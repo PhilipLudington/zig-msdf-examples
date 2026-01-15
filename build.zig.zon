@@ -1,0 +1,22 @@
+.{
+    .name = .zig_msdf_examples,
+    .version = "0.1.0",
+    .fingerprint = 0x460bd27e654ac8e7,
+    .minimum_zig_version = "0.14.0",
+    .dependencies = .{
+        .@"zig-msdf" = .{
+            .url = "git+https://github.com/PhilipLudington/zig-msdf#main",
+            .hash = "N-V-__8AAPvyCwAJn0aqgiJ7ChVuLqWwJUHey5Faq1P4zohx",
+        },
+        .sdl = .{
+            .url = "git+https://github.com/allyourcodebase/SDL3#main",
+            .hash = "sdl-0.0.0-i4QD0WN-qQB1RKdRC9-6iZyTco2jIIr3y2DFrAz-D9CH",
+        },
+    },
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "assets",
+    },
+}
