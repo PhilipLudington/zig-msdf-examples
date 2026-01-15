@@ -16,6 +16,7 @@ const basic_text = @import("examples/basic_text.zig");
 const atlas_demo = @import("examples/atlas_demo.zig");
 const interactive = @import("examples/interactive.zig");
 const gpu_text = @import("examples/gpu_text.zig");
+const atlas_compare = @import("examples/atlas_compare.zig");
 
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
@@ -40,6 +41,8 @@ pub fn main() !void {
         try interactive.run(allocator);
     } else if (std.mem.eql(u8, example, "gpu")) {
         try gpu_text.run(allocator);
+    } else if (std.mem.eql(u8, example, "compare")) {
+        try atlas_compare.run(allocator);
     } else if (std.mem.eql(u8, example, "--help") or std.mem.eql(u8, example, "-h")) {
         printUsage();
     } else {
@@ -71,6 +74,10 @@ fn printUsage() void {
         \\              Type text, zoom with mouse wheel, drag to pan.
         \\              Demonstrates real-time MSDF rendering.
         \\
+        \\  compare     Atlas comparison (zig-msdf vs msdfgen)
+        \\              Compare rendering between zig-msdf and an external
+        \\              msdfgen atlas. Provide atlas directory as argument.
+        \\
         \\Controls (common):
         \\  ESC         Exit
         \\
@@ -79,6 +86,7 @@ fn printUsage() void {
         \\  zig build run-basic       Run basic example
         \\  zig build run-atlas       Run atlas demo
         \\  zig build run-interactive Run interactive demo
+        \\  zig build run-compare     Run atlas comparison
         \\
     ;
     std.debug.print("{s}\n", .{usage});

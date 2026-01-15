@@ -116,6 +116,14 @@ pub fn build(b: *std.Build) void {
     const interactive_step = b.step("run-interactive", "Run interactive example");
     interactive_step.dependOn(&run_interactive.step);
 
+    const run_compare = b.addRunArtifact(exe);
+    run_compare.addArg("compare");
+    run_compare.addArg("msdfgen-atlas");
+    run_compare.setCwd(b.path("."));
+    run_compare.step.dependOn(b.getInstallStep());
+    const compare_step = b.step("run-compare", "Run atlas comparison example (zig-msdf vs msdfgen)");
+    compare_step.dependOn(&run_compare.step);
+
     // Tests
     const renderer_tests = b.addTest(.{
         .root_module = renderer_mod,
