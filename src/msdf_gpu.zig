@@ -64,6 +64,7 @@ pub const MsdfGpuRenderer = struct {
     vertices: std.ArrayListUnmanaged(Vertex),
     px_range: f32,
     glyph_size: f32,
+    padding: f32,
     max_vertices: u32,
 
     pub fn init(allocator: Allocator, config: Config) MsdfGpuError!MsdfGpuRenderer {
@@ -117,7 +118,7 @@ pub const MsdfGpuRenderer = struct {
         var atlas = msdf.generateAtlas(allocator, font, .{
             .chars = config.charset,
             .glyph_size = config.glyph_size,
-            .padding = 4,
+            .padding = config.padding,
             .range = config.px_range,
         }) catch |err| {
             log.err("Atlas generation failed: {}", .{err});
@@ -191,6 +192,7 @@ pub const MsdfGpuRenderer = struct {
             .vertices = .{},
             .px_range = config.px_range,
             .glyph_size = @floatFromInt(config.glyph_size),
+            .padding = @floatFromInt(config.padding),
             .max_vertices = max_vertices,
         };
     }
@@ -215,9 +217,8 @@ pub const MsdfGpuRenderer = struct {
     pub fn drawText(self: *MsdfGpuRenderer, text: []const u8, x: f32, y: f32, scale: f32, color: [4]f32) !void {
         var cursor_x = x;
 
-        // Padding fraction (padding=4 is hardcoded in atlas generation)
-        const padding: f32 = 4.0;
-        const padding_frac = padding / self.glyph_size;
+        // Padding fraction (same value used in atlas generation)
+        const padding_frac = self.padding / self.glyph_size;
 
         var utf8_iter = std.unicode.Utf8Iterator{ .bytes = text, .i = 0 };
         while (utf8_iter.nextCodepoint()) |codepoint| {
@@ -430,6 +431,7 @@ pub const MsdfGpuRenderer = struct {
         charset: []const u8 = " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()-=+[]{}|;:',.<>?/~`\"\\",
         glyph_size: u32 = 48,
         px_range: f32 = 4.0,
+        padding: u32 = 4,
     };
 };
 
