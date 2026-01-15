@@ -2,3 +2,4 @@
 zig-out/
 *.o
 zig-msdf-atlas/
+.DS_Store
