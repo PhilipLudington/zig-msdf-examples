@@ -163,6 +163,10 @@ fn renderText(
     const atlas_h: f32 = @floatFromInt(atlas.height);
     const glyph_size: f32 = 48.0;
 
+    // Padding fraction (padding=4 is hardcoded in atlas generation)
+    const padding: f32 = 4.0;
+    const padding_frac = padding / glyph_size;
+
     var utf8_iter = std.unicode.Utf8Iterator{ .bytes = text, .i = 0 };
     while (utf8_iter.nextCodepoint()) |codepoint| {
         const glyph = atlas.glyphs.get(codepoint) orelse {
@@ -172,21 +176,57 @@ fn renderText(
 
         const m = glyph.metrics;
 
+        // Skip glyphs with no visible size (like space)
+        if (m.width <= 0.001 or m.height <= 0.001) {
+            cursor_x += m.advance_width * glyph_size * scale;
+            continue;
+        }
+
+        // Calculate inner UV coordinates (excluding padding)
+        const uv_full_width = glyph.uv_max[0] - glyph.uv_min[0];
+        const uv_full_height = glyph.uv_max[1] - glyph.uv_min[1];
+
+        // Available space after padding (as fraction of cell)
+        const available_frac = 1.0 - 2.0 * padding_frac;
+
+        // The glyph is scaled to fit in available space, maintaining aspect ratio
+        const aspect = m.width / m.height;
+        var used_width_frac: f32 = undefined;
+        var used_height_frac: f32 = undefined;
+
+        if (aspect >= 1.0) {
+            used_width_frac = available_frac;
+            used_height_frac = available_frac / aspect;
+        } else {
+            used_height_frac = available_frac;
+            used_width_frac = available_frac * aspect;
+        }
+
+        // Calculate margins (glyph is centered in available space)
+        const h_margin = (1.0 - used_width_frac) / 2.0;
+        const v_margin = (1.0 - used_height_frac) / 2.0;
+
+        // Adjust UV coordinates
+        const inner_u0 = glyph.uv_min[0] + uv_full_width * h_margin;
+        const inner_v0 = glyph.uv_min[1] + uv_full_height * v_margin;
+        const inner_u1 = glyph.uv_max[0] - uv_full_width * h_margin;
+        const inner_v1 = glyph.uv_max[1] - uv_full_height * v_margin;
+
         const src = c.SDL_FRect{
-            .x = glyph.uv_min[0] * atlas_w,
-            .y = glyph.uv_min[1] * atlas_h,
-            .w = (glyph.uv_max[0] - glyph.uv_min[0]) * atlas_w,
-            .h = (glyph.uv_max[1] - glyph.uv_min[1]) * atlas_h,
+            .x = inner_u0 * atlas_w,
+            .y = inner_v0 * atlas_h,
+            .w = (inner_u1 - inner_u0) * atlas_w,
+            .h = (inner_v1 - inner_v0) * atlas_h,
         };
 
         const dst = c.SDL_FRect{
-            .x = cursor_x + m.bearing_x * scale,
-            .y = y + (glyph_size - m.bearing_y) * scale,
-            .w = m.width * scale,
-            .h = m.height * scale,
+            .x = cursor_x + m.bearing_x * glyph_size * scale,
+            .y = y + (1.0 - m.bearing_y) * glyph_size * scale,
+            .w = m.width * glyph_size * scale,
+            .h = m.height * glyph_size * scale,
         };
 
         _ = c.SDL_RenderTexture(renderer, texture, &src, &dst);
-        cursor_x += m.advance_width * scale;
+        cursor_x += m.advance_width * glyph_size * scale;
     }
 }
