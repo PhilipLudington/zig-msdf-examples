@@ -6,7 +6,7 @@
     .dependencies = .{
         .@"zig-msdf" = .{
             .url = "git+https://github.com/PhilipLudington/zig-msdf#main",
-            .hash = "N-V-__8AAPvyCwAJn0aqgiJ7ChVuLqWwJUHey5Faq1P4zohx",
+            .hash = "zig_msdf-0.1.0-1nuB2RpVBABJhhmbGkkm1k1Ic37kIYxEh-P6vFuGLWfW",
         },
         .sdl = .{
             .url = "git+https://github.com/allyourcodebase/SDL3#main",
