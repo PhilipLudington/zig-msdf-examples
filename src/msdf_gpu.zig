@@ -215,6 +215,10 @@ pub const MsdfGpuRenderer = struct {
     pub fn drawText(self: *MsdfGpuRenderer, text: []const u8, x: f32, y: f32, scale: f32, color: [4]f32) !void {
         var cursor_x = x;
 
+        // Padding fraction (padding=4 is hardcoded in atlas generation)
+        const padding: f32 = 4.0;
+        const padding_frac = padding / self.glyph_size;
+
         var utf8_iter = std.unicode.Utf8Iterator{ .bytes = text, .i = 0 };
         while (utf8_iter.nextCodepoint()) |codepoint| {
             const glyph = self.atlas.glyphs.get(codepoint) orelse {
@@ -223,17 +227,52 @@ pub const MsdfGpuRenderer = struct {
             };
 
             const m = glyph.metrics;
-            // Metrics are normalized (0-1), multiply by glyph_size to get pixels
+
+            // Skip glyphs with no visible size (like space)
+            if (m.width <= 0.001 or m.height <= 0.001) {
+                cursor_x += m.advance_width * self.glyph_size * scale;
+                continue;
+            }
+
+            // Position based on bearing (original logic)
             const gx = cursor_x + m.bearing_x * self.glyph_size * scale;
             const gy = y + (1.0 - m.bearing_y) * self.glyph_size * scale;
             const gw = m.width * self.glyph_size * scale;
             const gh = m.height * self.glyph_size * scale;
 
-            // UV coordinates
-            const tex_u0 = glyph.uv_min[0];
-            const tex_v0 = glyph.uv_min[1];
-            const tex_u1 = glyph.uv_max[0];
-            const tex_v1 = glyph.uv_max[1];
+            // Calculate inner UV coordinates (excluding padding)
+            // The glyph is rendered in the inner cell area and centered
+            const uv_full_width = glyph.uv_max[0] - glyph.uv_min[0];
+            const uv_full_height = glyph.uv_max[1] - glyph.uv_min[1];
+
+            // Available space after padding (as fraction of cell)
+            const available_frac = 1.0 - 2.0 * padding_frac;
+
+            // The glyph is scaled to fit in available space, maintaining aspect ratio
+            // Calculate how much of the available space the glyph actually uses
+            const aspect = m.width / m.height;
+            var used_width_frac: f32 = undefined;
+            var used_height_frac: f32 = undefined;
+
+            if (aspect >= 1.0) {
+                // Wide glyph - fills available width
+                used_width_frac = available_frac;
+                used_height_frac = available_frac / aspect;
+            } else {
+                // Tall glyph - fills available height
+                used_height_frac = available_frac;
+                used_width_frac = available_frac * aspect;
+            }
+
+            // Calculate margins (glyph is centered in available space)
+            const h_margin = (1.0 - used_width_frac) / 2.0;
+            const v_margin = (1.0 - used_height_frac) / 2.0;
+
+            // Adjust UV coordinates
+            const tex_u0 = glyph.uv_min[0] + uv_full_width * h_margin;
+            const tex_v0 = glyph.uv_min[1] + uv_full_height * v_margin;
+            const tex_u1 = glyph.uv_max[0] - uv_full_width * h_margin;
+            const tex_v1 = glyph.uv_max[1] - uv_full_height * v_margin;
 
             // Two triangles for the quad
             try self.vertices.appendSlice(self.allocator, &[_]Vertex{
