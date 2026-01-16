@@ -423,6 +423,16 @@ pub const MsdfGpuRenderer = struct {
         return &self.atlas;
     }
 
+    /// Enable text input events (required for SDL_EVENT_TEXT_INPUT)
+    pub fn startTextInput(self: *MsdfGpuRenderer) void {
+        _ = c.SDL_StartTextInput(self.window);
+    }
+
+    /// Disable text input events
+    pub fn stopTextInput(self: *MsdfGpuRenderer) void {
+        _ = c.SDL_StopTextInput(self.window);
+    }
+
     pub const Config = struct {
         title: [:0]const u8 = "MSDF Demo",
         width: u32 = 1024,
@@ -658,6 +668,11 @@ pub fn pollEvent() ?Event {
         c.SDL_EVENT_QUIT => .quit,
         c.SDL_EVENT_KEY_DOWN => .{ .key_down = sdl_event.key.key },
         c.SDL_EVENT_KEY_UP => .{ .key_up = sdl_event.key.key },
+        c.SDL_EVENT_TEXT_INPUT => blk: {
+            // SDL3 text input provides UTF-8 text (text field is already a pointer)
+            const text_ptr: [*:0]const u8 = @ptrCast(sdl_event.text.text);
+            break :blk .{ .text_input = std.mem.span(text_ptr) };
+        },
         c.SDL_EVENT_MOUSE_WHEEL => .{ .mouse_wheel = sdl_event.wheel.y },
         else => .other,
     };
@@ -667,6 +682,7 @@ pub const Event = union(enum) {
     quit,
     key_down: u32,
     key_up: u32,
+    text_input: []const u8,
     mouse_wheel: f32,
     other,
 };

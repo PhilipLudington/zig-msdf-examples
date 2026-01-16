@@ -32,6 +32,9 @@ pub fn run(allocator: Allocator) !void {
     log.info("GPU renderer initialized!", .{});
     log.info("Controls: Type text, mouse wheel to zoom, ESC to exit", .{});
 
+    // Enable text input for proper character handling (Shift, Caps Lock, etc.)
+    renderer.startTextInput();
+
     // Interactive state
     var input_buffer: [max_input_len]u8 = undefined;
     var input_len: usize = 0;
@@ -81,8 +84,8 @@ pub fn run(allocator: Allocator) !void {
                     if (key == '\t' or key == 9) {
                         color_index = (color_index + 1) % colors.len;
                     }
-                    // R resets view
-                    if (key == 'r' or key == 'R') {
+                    // R resets view (only lowercase 'r' to avoid conflict with typing 'R')
+                    if (key == 'r') {
                         scale = 1.0;
                         pan_x = 50;
                         pan_y = 200;
@@ -95,10 +98,12 @@ pub fn run(allocator: Allocator) !void {
                     // +/= and - for zoom
                     if (key == '=' or key == '+') scale = @min(scale * 1.2, max_scale);
                     if (key == '-' or key == '_') scale = @max(scale / 1.2, min_scale);
-                    // Handle printable ASCII characters
-                    if (key >= 32 and key < 127) {
+                },
+                .text_input => |text| {
+                    // Handle actual text input (respects Shift, Caps Lock, etc.)
+                    for (text) |char| {
                         if (input_len < max_input_len - 1) {
-                            input_buffer[input_len] = @truncate(key);
+                            input_buffer[input_len] = char;
                             input_len += 1;
                         }
                     }
@@ -144,15 +149,15 @@ pub fn run(allocator: Allocator) !void {
             pan_x,
             pan_y,
         }) catch "State info";
-        try renderer.drawText(state_info, 20, 50, 0.5, gray);
+        try renderer.drawText(state_info, 20, 70, 0.5, gray);
 
-        // Instructions
-        try renderer.drawText("Type to enter text | Mouse wheel to zoom | Arrows to pan", 20, 708, 0.5, gray);
-        try renderer.drawText("Tab: Change color | R: Reset view | +/-: Zoom | ESC: Exit", 20, 733, 0.5, dark_gray);
+        // Instructions (with proper spacing for text height)
+        try renderer.drawText("Type to enter text | Mouse wheel to zoom | Arrows to pan", 20, 700, 0.5, gray);
+        try renderer.drawText("Tab: Change color | r: Reset view | +/-: Zoom | ESC: Exit", 20, 735, 0.5, dark_gray);
 
-        // Show color indicator
-        try renderer.drawText("Color:", 874, 20, 0.5, gray);
-        try renderer.drawText("Sample", 944, 20, 0.5, current_color);
+        // Show color indicator (moved left to fit in window)
+        try renderer.drawText("Color: ", 820, 20, 0.5, gray);
+        try renderer.drawText("Sample", 820, 55, 0.5, current_color);
 
         _ = renderer.render(.{ 0.12, 0.12, 0.18, 1.0 });
     }
