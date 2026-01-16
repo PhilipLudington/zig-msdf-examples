@@ -1,232 +1,83 @@
 //! Basic Text Example
 //!
-//! Demonstrates MSDF text rendering at multiple scales.
-//! Uses SDL3's 2D renderer which provides hardware acceleration
-//! for texture blitting. For the full MSDF shader effect (crisp edges
-//! at any scale), the GPU pipeline with proper platform shaders is needed.
+//! Demonstrates MSDF text rendering at multiple scales with crisp edges.
 
 const std = @import("std");
 const Allocator = std.mem.Allocator;
-const msdf = @import("msdf");
+const msdf_gpu = @import("msdf_gpu");
 const assets = @import("assets");
-
-const c = @cImport({
-    @cInclude("SDL3/SDL.h");
-});
 
 const log = std.log.scoped(.basic_text);
 
 pub fn run(allocator: Allocator) !void {
     log.info("Starting MSDF text example", .{});
 
-    // Initialize SDL
-    if (!c.SDL_Init(c.SDL_INIT_VIDEO)) {
-        log.err("SDL_Init failed: {s}", .{c.SDL_GetError()});
-        return error.SdlInitFailed;
-    }
-    defer c.SDL_Quit();
-
-    // Create window
-    const window = c.SDL_CreateWindow(
-        "MSDF Text Demo",
-        1024,
-        768,
-        c.SDL_WINDOW_RESIZABLE,
-    ) orelse {
-        log.err("SDL_CreateWindow failed: {s}", .{c.SDL_GetError()});
-        return error.WindowCreationFailed;
-    };
-    defer c.SDL_DestroyWindow(window);
-
-    // Create renderer (hardware accelerated 2D)
-    const renderer = c.SDL_CreateRenderer(window, null) orelse {
-        log.err("SDL_CreateRenderer failed: {s}", .{c.SDL_GetError()});
-        return error.RendererCreationFailed;
-    };
-    defer c.SDL_DestroyRenderer(renderer);
-
-    // Load font and generate atlas
-    log.info("Loading font and generating MSDF atlas...", .{});
-    var font = msdf.Font.fromMemory(allocator, assets.dejavu_sans) catch |err| {
-        log.err("Failed to load font: {}", .{err});
-        return error.FontLoadFailed;
-    };
-    defer font.deinit();
-
-    var atlas = msdf.generateAtlas(allocator, font, .{
-        .chars = " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()-=+,.?:'\"",
+    var renderer = msdf_gpu.MsdfGpuRenderer.init(allocator, .{
+        .title = "MSDF Text Demo",
+        .width = 1024,
+        .height = 768,
+        .font_data = assets.dejavu_sans,
         .glyph_size = 48,
-        .padding = 4,
-        .range = 4.0,
+        .px_range = 4.0,
     }) catch |err| {
-        log.err("Failed to generate atlas: {}", .{err});
-        return error.AtlasGenerationFailed;
+        log.err("Failed to initialize renderer: {}", .{err});
+        return err;
     };
-    defer atlas.deinit(allocator);
-
-    log.info("Atlas: {}x{} pixels, {} glyphs", .{ atlas.width, atlas.height, atlas.glyphs.count() });
-
-    // Create texture from atlas
-    const texture = c.SDL_CreateTexture(
-        renderer,
-        c.SDL_PIXELFORMAT_RGBA32,
-        c.SDL_TEXTUREACCESS_STATIC,
-        @intCast(atlas.width),
-        @intCast(atlas.height),
-    ) orelse {
-        log.err("Failed to create texture: {s}", .{c.SDL_GetError()});
-        return error.TextureCreationFailed;
-    };
-    defer c.SDL_DestroyTexture(texture);
-
-    _ = c.SDL_UpdateTexture(texture, null, atlas.pixels.ptr, @intCast(atlas.width * 4));
-    _ = c.SDL_SetTextureBlendMode(texture, c.SDL_BLENDMODE_BLEND);
+    defer renderer.deinit();
 
     log.info("Ready! ESC=exit, SPACE=toggle mode, UP/DOWN or mouse wheel=zoom", .{});
 
     var scale_mode = false;
     var demo_scale: f32 = 1.0;
-
-    // Main loop
     var running = true;
+
     while (running) {
-        var event: c.SDL_Event = undefined;
-        while (c.SDL_PollEvent(&event)) {
-            switch (event.type) {
-                c.SDL_EVENT_QUIT => running = false,
-                c.SDL_EVENT_KEY_DOWN => {
-                    const key = event.key.key;
-                    if (key == c.SDLK_ESCAPE) running = false;
-                    if (key == c.SDLK_SPACE) scale_mode = !scale_mode;
-                    if (key == c.SDLK_UP or key == c.SDLK_EQUALS) demo_scale = @min(demo_scale * 1.2, 8.0);
-                    if (key == c.SDLK_DOWN or key == c.SDLK_MINUS) demo_scale = @max(demo_scale / 1.2, 0.1);
+        while (msdf_gpu.pollEvent()) |event| {
+            switch (event) {
+                .quit => running = false,
+                .key_down => |key| {
+                    if (key == 0x1B) running = false; // ESC
+                    if (key == ' ') scale_mode = !scale_mode;
+                    if (key == 0x40000052 or key == '=') demo_scale = @min(demo_scale * 1.2, 8.0); // UP
+                    if (key == 0x40000051 or key == '-') demo_scale = @max(demo_scale / 1.2, 0.1); // DOWN
                 },
-                c.SDL_EVENT_MOUSE_WHEEL => {
-                    if (event.wheel.y > 0) demo_scale = @min(demo_scale * 1.1, 8.0);
-                    if (event.wheel.y < 0) demo_scale = @max(demo_scale / 1.1, 0.1);
+                .mouse_wheel => |y| {
+                    if (y > 0) demo_scale = @min(demo_scale * 1.1, 8.0);
+                    if (y < 0) demo_scale = @max(demo_scale / 1.1, 0.1);
                 },
                 else => {},
             }
         }
 
-        // Clear
-        _ = c.SDL_SetRenderDrawColor(renderer, 20, 20, 30, 255);
-        _ = c.SDL_RenderClear(renderer);
+        renderer.clear();
 
         if (scale_mode) {
             // Interactive scale mode
-            renderText(renderer, texture, &atlas, "MSDF Text", 50, 100, demo_scale, .{ 255, 255, 255 });
-            renderText(renderer, texture, &atlas, "Zoom with mouse wheel!", 50, 100 + 60 * demo_scale, demo_scale * 0.4, .{ 100, 255, 150 });
+            try renderer.drawText("MSDF Text", 50, 100, demo_scale, .{ 1.0, 1.0, 1.0, 1.0 });
+            try renderer.drawText("Zoom with mouse wheel!", 50, 100 + 60 * demo_scale, demo_scale * 0.4, .{ 0.4, 1.0, 0.6, 1.0 });
 
             var buf: [64]u8 = undefined;
             const info = std.fmt.bufPrint(&buf, "Scale: {d:.2}x", .{demo_scale}) catch "Scale: ?";
-            renderText(renderer, texture, &atlas, info, 50, 700, 0.5, .{ 150, 150, 150 });
-            renderText(renderer, texture, &atlas, "SPACE for multi-scale view", 50, 730, 0.4, .{ 100, 100, 100 });
+            try renderer.drawText(info, 50, 700, 0.5, .{ 0.6, 0.6, 0.6, 1.0 });
+            try renderer.drawText("SPACE for multi-scale view", 50, 730, 0.4, .{ 0.4, 0.4, 0.4, 1.0 });
         } else {
             // Multi-scale demonstration
-            renderText(renderer, texture, &atlas, "MSDF Text Rendering Demo", 50, 30, 1.0, .{ 255, 255, 255 });
-            renderText(renderer, texture, &atlas, "Multi-channel Signed Distance Fields", 50, 80, 0.5, .{ 150, 150, 150 });
+            try renderer.drawText("MSDF Text Rendering Demo", 50, 30, 1.0, .{ 1.0, 1.0, 1.0, 1.0 });
+            try renderer.drawText("Multi-channel Signed Distance Fields", 50, 80, 0.5, .{ 0.6, 0.6, 0.6, 1.0 });
 
-            renderText(renderer, texture, &atlas, "Scale 0.3x - tiny", 50, 140, 0.3, .{ 100, 255, 150 });
-            renderText(renderer, texture, &atlas, "Scale 0.5x - small", 50, 170, 0.5, .{ 100, 255, 150 });
-            renderText(renderer, texture, &atlas, "Scale 0.75x - medium", 50, 210, 0.75, .{ 100, 200, 255 });
-            renderText(renderer, texture, &atlas, "Scale 1.0x - normal", 50, 260, 1.0, .{ 255, 255, 255 });
-            renderText(renderer, texture, &atlas, "Scale 1.5x - large", 50, 320, 1.5, .{ 255, 180, 100 });
-            renderText(renderer, texture, &atlas, "Scale 2.0x - bigger", 50, 400, 2.0, .{ 255, 150, 200 });
-            renderText(renderer, texture, &atlas, "Scale 3.0x", 50, 510, 3.0, .{ 100, 200, 255 });
+            try renderer.drawText("Scale 0.3x - tiny", 50, 140, 0.3, .{ 0.4, 1.0, 0.6, 1.0 });
+            try renderer.drawText("Scale 0.5x - small", 50, 170, 0.5, .{ 0.4, 1.0, 0.6, 1.0 });
+            try renderer.drawText("Scale 0.75x - medium", 50, 210, 0.75, .{ 0.4, 0.8, 1.0, 1.0 });
+            try renderer.drawText("Scale 1.0x - normal", 50, 260, 1.0, .{ 1.0, 1.0, 1.0, 1.0 });
+            try renderer.drawText("Scale 1.5x - large", 50, 320, 1.5, .{ 1.0, 0.7, 0.4, 1.0 });
+            try renderer.drawText("Scale 2.0x - bigger", 50, 400, 2.0, .{ 1.0, 0.6, 0.8, 1.0 });
+            try renderer.drawText("Scale 3.0x", 50, 510, 3.0, .{ 0.4, 0.8, 1.0, 1.0 });
 
-            renderText(renderer, texture, &atlas, "Note: Full MSDF shader gives crisp edges at ALL scales", 50, 680, 0.5, .{ 200, 200, 100 });
-            renderText(renderer, texture, &atlas, "SPACE for interactive zoom, ESC to exit", 50, 730, 0.4, .{ 100, 100, 100 });
+            try renderer.drawText("SPACE for interactive zoom, ESC to exit", 50, 730, 0.4, .{ 0.4, 0.4, 0.4, 1.0 });
         }
 
-        _ = c.SDL_RenderPresent(renderer);
-        c.SDL_Delay(16);
+        _ = renderer.render(.{ 0.08, 0.08, 0.12, 1.0 });
     }
 
     log.info("Example finished", .{});
-}
-
-fn renderText(
-    renderer: *c.SDL_Renderer,
-    texture: *c.SDL_Texture,
-    atlas: *const msdf.AtlasResult,
-    text: []const u8,
-    x: f32,
-    y: f32,
-    scale: f32,
-    color: [3]u8,
-) void {
-    _ = c.SDL_SetTextureColorMod(texture, color[0], color[1], color[2]);
-
-    var cursor_x = x;
-    const atlas_w: f32 = @floatFromInt(atlas.width);
-    const atlas_h: f32 = @floatFromInt(atlas.height);
-    const glyph_size: f32 = 48.0;
-
-    // Padding fraction (padding=4 is hardcoded in atlas generation)
-    const padding: f32 = 4.0;
-    const padding_frac = padding / glyph_size;
-
-    var utf8_iter = std.unicode.Utf8Iterator{ .bytes = text, .i = 0 };
-    while (utf8_iter.nextCodepoint()) |codepoint| {
-        const glyph = atlas.glyphs.get(codepoint) orelse {
-            cursor_x += glyph_size * 0.3 * scale;
-            continue;
-        };
-
-        const m = glyph.metrics;
-
-        // Skip glyphs with no visible size (like space)
-        if (m.width <= 0.001 or m.height <= 0.001) {
-            cursor_x += m.advance_width * glyph_size * scale;
-            continue;
-        }
-
-        // Calculate inner UV coordinates (excluding padding)
-        const uv_full_width = glyph.uv_max[0] - glyph.uv_min[0];
-        const uv_full_height = glyph.uv_max[1] - glyph.uv_min[1];
-
-        // Available space after padding (as fraction of cell)
-        const available_frac = 1.0 - 2.0 * padding_frac;
-
-        // The glyph is scaled to fit in available space, maintaining aspect ratio
-        const aspect = m.width / m.height;
-        var used_width_frac: f32 = undefined;
-        var used_height_frac: f32 = undefined;
-
-        if (aspect >= 1.0) {
-            used_width_frac = available_frac;
-            used_height_frac = available_frac / aspect;
-        } else {
-            used_height_frac = available_frac;
-            used_width_frac = available_frac * aspect;
-        }
-
-        // Calculate margins (glyph is centered in available space)
-        const h_margin = (1.0 - used_width_frac) / 2.0;
-        const v_margin = (1.0 - used_height_frac) / 2.0;
-
-        // Adjust UV coordinates
-        const inner_u0 = glyph.uv_min[0] + uv_full_width * h_margin;
-        const inner_v0 = glyph.uv_min[1] + uv_full_height * v_margin;
-        const inner_u1 = glyph.uv_max[0] - uv_full_width * h_margin;
-        const inner_v1 = glyph.uv_max[1] - uv_full_height * v_margin;
-
-        const src = c.SDL_FRect{
-            .x = inner_u0 * atlas_w,
-            .y = inner_v0 * atlas_h,
-            .w = (inner_u1 - inner_u0) * atlas_w,
-            .h = (inner_v1 - inner_v0) * atlas_h,
-        };
-
-        const dst = c.SDL_FRect{
-            .x = cursor_x + m.bearing_x * glyph_size * scale,
-            .y = y + (1.0 - m.bearing_y) * glyph_size * scale,
-            .w = m.width * glyph_size * scale,
-            .h = m.height * glyph_size * scale,
-        };
-
-        _ = c.SDL_RenderTexture(renderer, texture, &src, &dst);
-        cursor_x += m.advance_width * glyph_size * scale;
-    }
 }

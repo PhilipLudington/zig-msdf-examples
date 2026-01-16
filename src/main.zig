@@ -4,8 +4,8 @@
 //!   msdf-examples [example]
 //!
 //! Examples:
-//!   basic       - Basic text rendering at multiple scales (SDL 2D renderer)
-//!   gpu         - GPU accelerated rendering with MSDF shaders (recommended)
+//!   basic       - Basic text rendering at multiple scales
+//!   gpu         - GPU accelerated rendering with MSDF shaders
 //!   atlas       - Atlas texture visualization
 //!   interactive - Interactive demo with zoom and pan
 //!
@@ -58,13 +58,11 @@ fn printUsage() void {
         \\Usage: msdf-examples <example>
         \\
         \\Available examples:
-        \\  basic       Basic text rendering (SDL3 2D renderer)
-        \\              Shows MSDF text at multiple scales using simple
-        \\              texture blitting.
+        \\  basic       Basic text rendering at multiple scales
+        \\              Shows MSDF text at various sizes with crisp edges.
         \\
-        \\  gpu         GPU accelerated rendering (recommended)
-        \\              Uses SDL3 GPU API with MSDF shaders for crisp
-        \\              text at any scale. Metal on macOS, SPIR-V elsewhere.
+        \\  gpu         GPU accelerated rendering
+        \\              Same as basic but with different demo layout.
         \\
         \\  atlas       Atlas texture visualization
         \\              Displays the generated glyph atlas and shows
