@@ -419,17 +419,18 @@ pub fn run(allocator: Allocator) !void {
         // Clear vertices
         vertices.clearRetainingCapacity();
 
+        // Draw font/source info header (shown on both screens)
+        const font_name = font_atlases[current_font_index].font_type.name();
+        const source_name = @tagName(current_source);
+        var title_buf: [128]u8 = undefined;
+        const title = std.fmt.bufPrint(&title_buf, "Font: {s} | Source: {s}", .{ font_name, source_name }) catch "Font: ?";
+        try addText(&vertices, allocator, atlas, title, 50, 30, 0.6, .{ 1.0, 0.8, 0.2, 1.0 });
+
         if (show_atlas) {
             // Draw the atlas texture itself
-            try addAtlasQuad(&vertices, allocator, atlas, 50, 50, 512);
+            try addAtlasQuad(&vertices, allocator, atlas, 50, 80, 512);
         } else {
             // Draw demo text
-            const font_name = font_atlases[current_font_index].font_type.name();
-            const source_name = @tagName(current_source);
-            var title_buf: [128]u8 = undefined;
-            const title = std.fmt.bufPrint(&title_buf, "Font: {s} | Source: {s}", .{ font_name, source_name }) catch "Font: ?";
-            try addText(&vertices, allocator, atlas, title, 50, 30, 0.6, .{ 1.0, 0.8, 0.2, 1.0 });
-
             try addText(&vertices, allocator, atlas, "MSDF Text Rendering", 50, 100, demo_scale, .{ 1.0, 1.0, 1.0, 1.0 });
             try addText(&vertices, allocator, atlas, "The quick brown fox jumps", 50, 100 + 60 * demo_scale, demo_scale * 0.6, .{ 0.8, 0.8, 0.8, 1.0 });
             try addText(&vertices, allocator, atlas, "over the lazy dog.", 50, 100 + 100 * demo_scale, demo_scale * 0.6, .{ 0.8, 0.8, 0.8, 1.0 });
