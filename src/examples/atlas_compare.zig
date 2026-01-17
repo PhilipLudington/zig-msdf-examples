@@ -52,6 +52,33 @@ const AtlasSource = enum {
     msdfgen,
 };
 
+/// Font selection
+const FontType = enum {
+    dejavu_sans,
+    sf_mono,
+
+    pub fn name(self: FontType) []const u8 {
+        return switch (self) {
+            .dejavu_sans => "DejaVu Sans",
+            .sf_mono => "SF Mono",
+        };
+    }
+
+    pub fn fontData(self: FontType) []const u8 {
+        return switch (self) {
+            .dejavu_sans => assets.dejavu_sans,
+            .sf_mono => assets.sf_mono,
+        };
+    }
+
+    pub fn msdfgenAtlasPath(self: FontType) []const u8 {
+        return switch (self) {
+            .dejavu_sans => "msdfgen-atlas",
+            .sf_mono => "msdfgen-atlas-sfmono",
+        };
+    }
+};
+
 /// Loaded atlas data
 const LoadedAtlas = struct {
     texture: *c.SDL_GPUTexture,
@@ -71,6 +98,85 @@ const LoadedAtlas = struct {
         _ = allocator;
     }
 };
+
+/// Font atlas resources (font + generated atlas + GPU texture)
+const FontAtlasResources = struct {
+    font: msdf.Font,
+    atlas_result: msdf.AtlasResult,
+    loaded_atlas: LoadedAtlas,
+    font_type: FontType,
+
+    fn deinit(self: *FontAtlasResources, device: *c.SDL_GPUDevice) void {
+        c.SDL_ReleaseGPUTexture(device, self.loaded_atlas.texture);
+        self.atlas_result.deinit(self.font.allocator);
+        self.font.deinit();
+    }
+};
+
+/// Create font atlas resources for a given font type
+fn createFontAtlas(
+    allocator: Allocator,
+    device: *c.SDL_GPUDevice,
+    font_type: FontType,
+    glyph_size: u32,
+    px_range: f32,
+    padding: u32,
+    charset: []const u8,
+) !FontAtlasResources {
+    log.info("Loading font: {s}", .{font_type.name()});
+
+    var font = msdf.Font.fromMemory(allocator, font_type.fontData()) catch |err| {
+        log.err("Font load failed for {s}: {}", .{ font_type.name(), err });
+        return error.FontLoadFailed;
+    };
+    errdefer font.deinit();
+
+    // Detect if font has inverted winding order
+    const needs_inversion = msdf.detectInvertedWinding(allocator, font);
+    if (needs_inversion) {
+        log.info("{s}: detected inverted winding, enabling distance inversion", .{font_type.name()});
+    }
+
+    var atlas_result = msdf.generateAtlas(allocator, font, .{
+        .chars = charset,
+        .glyph_size = glyph_size,
+        .padding = padding,
+        .range = px_range,
+        .invert_distances = needs_inversion,
+    }) catch |err| {
+        log.err("Atlas generation failed for {s}: {}", .{ font_type.name(), err });
+        return error.AtlasGenerationFailed;
+    };
+    errdefer atlas_result.deinit(allocator);
+
+    log.info("{s} atlas: {}x{}, {} glyphs", .{
+        font_type.name(),
+        atlas_result.width,
+        atlas_result.height,
+        atlas_result.glyphs.count(),
+    });
+
+    const texture = createAtlasTexture(device, atlas_result.width, atlas_result.height) orelse
+        return error.TextureCreationFailed;
+
+    uploadAtlasData(device, texture, atlas_result.pixels, atlas_result.width, atlas_result.height);
+
+    return FontAtlasResources{
+        .font = font,
+        .atlas_result = atlas_result,
+        .loaded_atlas = LoadedAtlas{
+            .texture = texture,
+            .glyphs = atlas_result.glyphs,
+            .width = atlas_result.width,
+            .height = atlas_result.height,
+            .px_range = px_range,
+            .glyph_size = @floatFromInt(glyph_size),
+            .padding = @floatFromInt(padding),
+            .uses_uniform_cells = true,
+        },
+        .font_type = font_type,
+    };
+}
 
 pub fn run(allocator: Allocator) !void {
     log.info("Starting Atlas Comparison Example", .{});
@@ -138,70 +244,77 @@ pub fn run(allocator: Allocator) !void {
     const sampler = createSampler(device) orelse return error.SamplerCreationFailed;
     defer c.SDL_ReleaseGPUSampler(device, sampler);
 
-    // Load font
-    var font = msdf.Font.fromMemory(allocator, assets.dejavu_sans) catch |err| {
-        log.err("Font load failed: {}", .{err});
-        return error.FontLoadFailed;
-    };
-    defer font.deinit();
-
-    // Generate zig-msdf atlas
+    // Atlas generation parameters
     const glyph_size: u32 = 48;
     const px_range: f32 = 4.0;
     const padding: u32 = 4;
     const charset = " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()-=+[]{}|;:',.<>?/~`\"\\";
 
-    var zig_atlas_result = msdf.generateAtlas(allocator, font, .{
-        .chars = charset,
-        .glyph_size = glyph_size,
-        .padding = padding,
-        .range = px_range,
-    }) catch |err| {
-        log.err("zig-msdf atlas generation failed: {}", .{err});
-        return error.AtlasGenerationFailed;
+    // Load fonts and generate atlases
+    var font_atlases: [2]FontAtlasResources = undefined;
+    var fonts_loaded: usize = 0;
+
+    // Load DejaVu Sans (font 1)
+    font_atlases[0] = createFontAtlas(allocator, device, .dejavu_sans, glyph_size, px_range, padding, charset) catch |err| {
+        log.err("Failed to create DejaVu Sans atlas: {}", .{err});
+        return err;
     };
-    defer zig_atlas_result.deinit(allocator);
+    fonts_loaded = 1;
+    errdefer font_atlases[0].deinit(device);
 
-    log.info("zig-msdf atlas: {}x{}, {} glyphs", .{ zig_atlas_result.width, zig_atlas_result.height, zig_atlas_result.glyphs.count() });
-
-    // Create zig-msdf atlas texture
-    var zig_atlas = LoadedAtlas{
-        .texture = createAtlasTexture(device, zig_atlas_result.width, zig_atlas_result.height) orelse return error.TextureCreationFailed,
-        .glyphs = zig_atlas_result.glyphs,
-        .width = zig_atlas_result.width,
-        .height = zig_atlas_result.height,
-        .px_range = px_range,
-        .glyph_size = @floatFromInt(glyph_size),
-        .padding = @floatFromInt(padding),
-        .uses_uniform_cells = true,
+    // Load SF Mono (font 2)
+    font_atlases[1] = createFontAtlas(allocator, device, .sf_mono, glyph_size, px_range, padding, charset) catch |err| {
+        log.err("Failed to create SF Mono atlas: {}", .{err});
+        return err;
     };
-    // Note: we don't deinit zig_atlas.glyphs since zig_atlas_result owns it
-    defer c.SDL_ReleaseGPUTexture(device, zig_atlas.texture);
+    fonts_loaded = 2;
 
-    uploadAtlasData(device, zig_atlas.texture, zig_atlas_result.pixels, zig_atlas_result.width, zig_atlas_result.height);
-
-    // Try to load msdfgen atlas
-    var msdfgen_atlas: ?LoadedAtlas = null;
-    var msdfgen_glyphs: ?std.AutoHashMap(u21, msdf.AtlasGlyph) = null;
-    var msdfgen_pixels: ?[]u8 = null;
     defer {
-        if (msdfgen_atlas) |*atlas| {
-            c.SDL_ReleaseGPUTexture(device, atlas.texture);
-        }
-        if (msdfgen_glyphs) |*g| {
-            g.deinit();
-        }
-        if (msdfgen_pixels) |p| {
-            allocator.free(p);
+        for (0..fonts_loaded) |i| {
+            font_atlases[i].deinit(device);
         }
     }
 
-    if (msdfgen_atlas_path) |path| {
-        log.info("Loading msdfgen atlas from: {s}", .{path});
+    // Current font selection (0 = DejaVu Sans, 1 = SF Mono)
+    var current_font_index: usize = 0;
+
+    // Try to load msdfgen atlases for each font
+    const MsdfgenAtlasData = struct {
+        atlas: ?LoadedAtlas,
+        glyphs: ?std.AutoHashMap(u21, msdf.AtlasGlyph),
+        pixels: ?[]u8,
+    };
+    var msdfgen_atlases: [2]MsdfgenAtlasData = .{
+        .{ .atlas = null, .glyphs = null, .pixels = null },
+        .{ .atlas = null, .glyphs = null, .pixels = null },
+    };
+    defer {
+        for (&msdfgen_atlases) |*msdfgen_data| {
+            if (msdfgen_data.atlas) |*atlas| {
+                c.SDL_ReleaseGPUTexture(device, atlas.texture);
+            }
+            if (msdfgen_data.glyphs) |*g| {
+                g.deinit();
+            }
+            if (msdfgen_data.pixels) |p| {
+                allocator.free(p);
+            }
+        }
+    }
+
+    // Load msdfgen atlas for each font from their respective directories
+    const font_types = [_]FontType{ .dejavu_sans, .sf_mono };
+    for (font_types, 0..) |font_type, i| {
+        const path = if (msdfgen_atlas_path != null and i == 0)
+            msdfgen_atlas_path.? // Use command-line path for first font if provided
+        else
+            font_type.msdfgenAtlasPath();
+
+        log.info("Loading msdfgen atlas for {s} from: {s}", .{ font_type.name(), path });
         if (loadMsdfgenAtlas(allocator, device, path)) |loaded| {
-            msdfgen_glyphs = loaded.glyphs;
-            msdfgen_pixels = loaded.pixels;
-            msdfgen_atlas = LoadedAtlas{
+            msdfgen_atlases[i].glyphs = loaded.glyphs;
+            msdfgen_atlases[i].pixels = loaded.pixels;
+            msdfgen_atlases[i].atlas = LoadedAtlas{
                 .texture = loaded.texture,
                 .glyphs = loaded.glyphs,
                 .width = loaded.width,
@@ -211,14 +324,10 @@ pub fn run(allocator: Allocator) !void {
                 .padding = loaded.padding,
                 .uses_uniform_cells = false, // msdfgen uses tight packing
             };
-            log.info("msdfgen atlas loaded: {}x{}, {} glyphs", .{ loaded.width, loaded.height, loaded.glyphs.count() });
+            log.info("{s} msdfgen atlas loaded: {}x{}, {} glyphs", .{ font_type.name(), loaded.width, loaded.height, loaded.glyphs.count() });
         } else |err| {
-            log.warn("Failed to load msdfgen atlas: {} - using zig-msdf only", .{err});
+            log.warn("Failed to load msdfgen atlas for {s}: {}", .{ font_type.name(), err });
         }
-    } else {
-        log.info("No msdfgen atlas path provided. Use: msdf-examples compare <atlas-dir>", .{});
-        log.info("To generate msdfgen atlas:", .{});
-        log.info("  msdf-atlas-gen -font DejaVuSans.ttf -charset ascii -pxrange 4 -size 48 -imageout atlas.png -json atlas.json", .{});
     }
 
     // Create vertex and transfer buffers
@@ -242,9 +351,11 @@ pub fn run(allocator: Allocator) !void {
     defer vertices.deinit(allocator);
 
     log.info("Controls:", .{});
+    log.info("  1     - Select DejaVu Sans font", .{});
+    log.info("  2     - Select SF Mono font", .{});
     log.info("  SPACE - Toggle between zig-msdf and msdfgen atlas", .{});
     log.info("  T     - Toggle atlas view / text view", .{});
-    log.info("  E     - Export zig-msdf atlas to zig-msdf-atlas/ directory", .{});
+    log.info("  E     - Export current font atlas to zig-msdf-atlas/ directory", .{});
     log.info("  UP/DOWN or Mouse wheel - Adjust scale", .{});
     log.info("  ESC   - Exit", .{});
 
@@ -257,19 +368,33 @@ pub fn run(allocator: Allocator) !void {
                 c.SDL_EVENT_KEY_DOWN => {
                     const key = event.key.key;
                     if (key == c.SDLK_ESCAPE) running = false;
+                    // Font selection with number keys
+                    if (key == c.SDLK_1) {
+                        if (current_font_index != 0) {
+                            current_font_index = 0;
+                            log.info("Switched to font: {s}", .{font_atlases[0].font_type.name()});
+                        }
+                    }
+                    if (key == c.SDLK_2) {
+                        if (current_font_index != 1) {
+                            current_font_index = 1;
+                            log.info("Switched to font: {s}", .{font_atlases[1].font_type.name()});
+                        }
+                    }
                     if (key == c.SDLK_SPACE) {
-                        if (msdfgen_atlas != null) {
+                        // Toggle between zig-msdf and msdfgen atlas for current font
+                        if (msdfgen_atlases[current_font_index].atlas != null) {
                             current_source = if (current_source == .zig_msdf) .msdfgen else .zig_msdf;
                             log.info("Switched to: {s}", .{@tagName(current_source)});
                         } else {
-                            log.info("No msdfgen atlas loaded to compare", .{});
+                            log.info("No msdfgen atlas loaded for {s}", .{font_atlases[current_font_index].font_type.name()});
                         }
                     }
                     if (key == 't' or key == 'T') {
                         show_atlas = !show_atlas;
                     }
                     if (key == 'e' or key == 'E') {
-                        exportAtlas(allocator, &zig_atlas_result, glyph_size, px_range, padding) catch |err| {
+                        exportAtlas(allocator, &font_atlases[current_font_index].atlas_result, glyph_size, px_range, padding) catch |err| {
                             log.err("Failed to export atlas: {}", .{err});
                         };
                     }
@@ -284,10 +409,11 @@ pub fn run(allocator: Allocator) !void {
             }
         }
 
-        // Get current atlas
+        // Get current atlas (use selected font's atlas, or msdfgen if in comparison mode)
+        const zig_atlas = &font_atlases[current_font_index].loaded_atlas;
         const atlas: *const LoadedAtlas = switch (current_source) {
-            .zig_msdf => &zig_atlas,
-            .msdfgen => if (msdfgen_atlas) |*a| a else &zig_atlas,
+            .zig_msdf => zig_atlas,
+            .msdfgen => if (msdfgen_atlases[current_font_index].atlas) |*a| a else zig_atlas,
         };
 
         // Clear vertices
@@ -298,10 +424,11 @@ pub fn run(allocator: Allocator) !void {
             try addAtlasQuad(&vertices, allocator, atlas, 50, 50, 512);
         } else {
             // Draw demo text
+            const font_name = font_atlases[current_font_index].font_type.name();
             const source_name = @tagName(current_source);
-            var title_buf: [64]u8 = undefined;
-            const title = std.fmt.bufPrint(&title_buf, "Source: {s}", .{source_name}) catch "Source: ?";
-            try addText(&vertices, allocator, atlas, title, 50, 30, 0.8, .{ 1.0, 0.8, 0.2, 1.0 });
+            var title_buf: [128]u8 = undefined;
+            const title = std.fmt.bufPrint(&title_buf, "Font: {s} | Source: {s}", .{ font_name, source_name }) catch "Font: ?";
+            try addText(&vertices, allocator, atlas, title, 50, 30, 0.6, .{ 1.0, 0.8, 0.2, 1.0 });
 
             try addText(&vertices, allocator, atlas, "MSDF Text Rendering", 50, 100, demo_scale, .{ 1.0, 1.0, 1.0, 1.0 });
             try addText(&vertices, allocator, atlas, "The quick brown fox jumps", 50, 100 + 60 * demo_scale, demo_scale * 0.6, .{ 0.8, 0.8, 0.8, 1.0 });
@@ -313,7 +440,7 @@ pub fn run(allocator: Allocator) !void {
             try addText(&vertices, allocator, atlas, scale_text, 50, 700, 0.4, .{ 0.5, 0.5, 0.5, 1.0 });
 
             // Instructions
-            try addText(&vertices, allocator, atlas, "SPACE=toggle source, T=show atlas, Wheel=zoom", 50, 730, 0.35, .{ 0.4, 0.4, 0.4, 1.0 });
+            try addText(&vertices, allocator, atlas, "1/2=font, SPACE=source, T=atlas, Wheel=zoom", 50, 730, 0.35, .{ 0.4, 0.4, 0.4, 1.0 });
         }
 
         // Render
