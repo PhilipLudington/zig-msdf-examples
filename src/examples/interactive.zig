@@ -108,12 +108,12 @@ pub fn run(allocator: Allocator) !void {
                         }
                     }
                 },
-                .mouse_wheel => |y| {
+                .mouse_wheel => |wheel| {
                     // Zoom with mouse wheel
                     const zoom_factor: f32 = 1.1;
-                    if (y > 0) {
+                    if (wheel.delta > 0) {
                         scale = @min(scale * zoom_factor, max_scale);
-                    } else if (y < 0) {
+                    } else if (wheel.delta < 0) {
                         scale = @max(scale / zoom_factor, min_scale);
                     }
                 },

@@ -41,9 +41,9 @@ pub fn run(allocator: Allocator) !void {
                     if (key == 0x40000052 or key == '=') demo_scale = @min(demo_scale * 1.2, 8.0); // UP
                     if (key == 0x40000051 or key == '-') demo_scale = @max(demo_scale / 1.2, 0.1); // DOWN
                 },
-                .mouse_wheel => |y| {
-                    if (y > 0) demo_scale = @min(demo_scale * 1.1, 8.0);
-                    if (y < 0) demo_scale = @max(demo_scale / 1.1, 0.1);
+                .mouse_wheel => |wheel| {
+                    if (wheel.delta > 0) demo_scale = @min(demo_scale * 1.1, 8.0);
+                    if (wheel.delta < 0) demo_scale = @max(demo_scale / 1.1, 0.1);
                 },
                 else => {},
             }

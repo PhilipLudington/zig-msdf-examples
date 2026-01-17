@@ -673,7 +673,25 @@ pub fn pollEvent() ?Event {
             const text_ptr: [*:0]const u8 = @ptrCast(sdl_event.text.text);
             break :blk .{ .text_input = std.mem.span(text_ptr) };
         },
-        c.SDL_EVENT_MOUSE_WHEEL => .{ .mouse_wheel = sdl_event.wheel.y },
+        c.SDL_EVENT_MOUSE_WHEEL => .{ .mouse_wheel = .{
+            .delta = sdl_event.wheel.y,
+            .x = sdl_event.wheel.mouse_x,
+            .y = sdl_event.wheel.mouse_y,
+        } },
+        c.SDL_EVENT_MOUSE_MOTION => .{ .mouse_motion = .{
+            .x = sdl_event.motion.x,
+            .y = sdl_event.motion.y,
+        } },
+        c.SDL_EVENT_MOUSE_BUTTON_DOWN => .{ .mouse_button_down = .{
+            .button = sdl_event.button.button,
+            .x = sdl_event.button.x,
+            .y = sdl_event.button.y,
+        } },
+        c.SDL_EVENT_MOUSE_BUTTON_UP => .{ .mouse_button_up = .{
+            .button = sdl_event.button.button,
+            .x = sdl_event.button.x,
+            .y = sdl_event.button.y,
+        } },
         else => .other,
     };
 }
@@ -683,6 +701,30 @@ pub const Event = union(enum) {
     key_down: u32,
     key_up: u32,
     text_input: []const u8,
-    mouse_wheel: f32,
+    mouse_wheel: MouseWheelEvent,
+    mouse_motion: MousePos,
+    mouse_button_down: MouseButtonEvent,
+    mouse_button_up: MouseButtonEvent,
     other,
 };
+
+pub const MousePos = struct {
+    x: f32,
+    y: f32,
+};
+
+pub const MouseWheelEvent = struct {
+    delta: f32,
+    x: f32,
+    y: f32,
+};
+
+pub const MouseButtonEvent = struct {
+    button: u8,
+    x: f32,
+    y: f32,
+};
+
+pub const MOUSE_BUTTON_LEFT: u8 = c.SDL_BUTTON_LEFT;
+pub const MOUSE_BUTTON_RIGHT: u8 = c.SDL_BUTTON_RIGHT;
+pub const MOUSE_BUTTON_MIDDLE: u8 = c.SDL_BUTTON_MIDDLE;

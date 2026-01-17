@@ -345,10 +345,34 @@ pub fn run(allocator: Allocator) !void {
     // State
     var current_source: AtlasSource = .zig_msdf;
     var show_atlas: bool = false;
-    var demo_scale: f32 = 1.0;
     var running = true;
     var vertices = std.ArrayListUnmanaged(Vertex){};
     defer vertices.deinit(allocator);
+
+    // Text view zoom/pan state
+    var text_scale: f32 = 1.0;
+    var text_pan_x: f32 = 50;
+    var text_pan_y: f32 = 100;
+    const min_text_scale: f32 = 0.1;
+    const max_text_scale: f32 = 8.0;
+
+    // Atlas view zoom/pan state
+    var atlas_scale: f32 = 1.0;
+    var atlas_pan_x: f32 = 50;
+    var atlas_pan_y: f32 = 80;
+    const min_atlas_scale: f32 = 0.2;
+    const max_atlas_scale: f32 = 10.0;
+
+    // Mouse position
+    var mouse_x: f32 = 512;
+    var mouse_y: f32 = 384;
+
+    // Drag state for panning
+    var is_dragging = false;
+    var drag_start_x: f32 = 0;
+    var drag_start_y: f32 = 0;
+    var drag_start_pan_x: f32 = 0;
+    var drag_start_pan_y: f32 = 0;
 
     log.info("Controls:", .{});
     log.info("  1     - Select DejaVu Sans font", .{});
@@ -398,12 +422,85 @@ pub fn run(allocator: Allocator) !void {
                             log.err("Failed to export atlas: {}", .{err});
                         };
                     }
-                    if (key == c.SDLK_UP or key == c.SDLK_EQUALS) demo_scale = @min(demo_scale * 1.2, 8.0);
-                    if (key == c.SDLK_DOWN or key == c.SDLK_MINUS) demo_scale = @max(demo_scale / 1.2, 0.1);
+                    // R to reset zoom and pan
+                    if (key == 'r' or key == 'R') {
+                        if (show_atlas) {
+                            atlas_scale = 1.0;
+                            atlas_pan_x = 50;
+                            atlas_pan_y = 80;
+                        } else {
+                            text_scale = 1.0;
+                            text_pan_x = 50;
+                            text_pan_y = 100;
+                        }
+                    }
+                },
+                c.SDL_EVENT_MOUSE_MOTION => {
+                    mouse_x = event.motion.x;
+                    mouse_y = event.motion.y;
+
+                    // Handle drag panning
+                    if (is_dragging) {
+                        const dx = event.motion.x - drag_start_x;
+                        const dy = event.motion.y - drag_start_y;
+                        if (show_atlas) {
+                            atlas_pan_x = drag_start_pan_x + dx;
+                            atlas_pan_y = drag_start_pan_y + dy;
+                        } else {
+                            text_pan_x = drag_start_pan_x + dx;
+                            text_pan_y = drag_start_pan_y + dy;
+                        }
+                    }
+                },
+                c.SDL_EVENT_MOUSE_BUTTON_DOWN => {
+                    if (event.button.button == c.SDL_BUTTON_LEFT) {
+                        is_dragging = true;
+                        drag_start_x = event.button.x;
+                        drag_start_y = event.button.y;
+                        if (show_atlas) {
+                            drag_start_pan_x = atlas_pan_x;
+                            drag_start_pan_y = atlas_pan_y;
+                        } else {
+                            drag_start_pan_x = text_pan_x;
+                            drag_start_pan_y = text_pan_y;
+                        }
+                    }
+                },
+                c.SDL_EVENT_MOUSE_BUTTON_UP => {
+                    if (event.button.button == c.SDL_BUTTON_LEFT) {
+                        is_dragging = false;
+                    }
                 },
                 c.SDL_EVENT_MOUSE_WHEEL => {
-                    if (event.wheel.y > 0) demo_scale = @min(demo_scale * 1.1, 8.0);
-                    if (event.wheel.y < 0) demo_scale = @max(demo_scale / 1.1, 0.1);
+                    const zoom_factor: f32 = 1.15;
+                    const wheel_x = event.wheel.mouse_x;
+                    const wheel_y = event.wheel.mouse_y;
+
+                    if (show_atlas) {
+                        // Atlas view zoom
+                        const old_scale = atlas_scale;
+                        if (event.wheel.y > 0) {
+                            atlas_scale = @min(atlas_scale * zoom_factor, max_atlas_scale);
+                        } else if (event.wheel.y < 0) {
+                            atlas_scale = @max(atlas_scale / zoom_factor, min_atlas_scale);
+                        }
+                        // Adjust pan to keep mouse position fixed
+                        const zoom_ratio = atlas_scale / old_scale;
+                        atlas_pan_x = wheel_x - (wheel_x - atlas_pan_x) * zoom_ratio;
+                        atlas_pan_y = wheel_y - (wheel_y - atlas_pan_y) * zoom_ratio;
+                    } else {
+                        // Text view zoom
+                        const old_scale = text_scale;
+                        if (event.wheel.y > 0) {
+                            text_scale = @min(text_scale * zoom_factor, max_text_scale);
+                        } else if (event.wheel.y < 0) {
+                            text_scale = @max(text_scale / zoom_factor, min_text_scale);
+                        }
+                        // Adjust pan to keep mouse position fixed
+                        const zoom_ratio = text_scale / old_scale;
+                        text_pan_x = wheel_x - (wheel_x - text_pan_x) * zoom_ratio;
+                        text_pan_y = wheel_y - (wheel_y - text_pan_y) * zoom_ratio;
+                    }
                 },
                 else => {},
             }
@@ -427,21 +524,28 @@ pub fn run(allocator: Allocator) !void {
         try addText(&vertices, allocator, atlas, title, 50, 30, 0.6, .{ 1.0, 0.8, 0.2, 1.0 });
 
         if (show_atlas) {
-            // Draw the atlas texture itself
-            try addAtlasQuad(&vertices, allocator, atlas, 50, 80, 512);
-        } else {
-            // Draw demo text
-            try addText(&vertices, allocator, atlas, "MSDF Text Rendering", 50, 100, demo_scale, .{ 1.0, 1.0, 1.0, 1.0 });
-            try addText(&vertices, allocator, atlas, "The quick brown fox jumps", 50, 100 + 60 * demo_scale, demo_scale * 0.6, .{ 0.8, 0.8, 0.8, 1.0 });
-            try addText(&vertices, allocator, atlas, "over the lazy dog.", 50, 100 + 100 * demo_scale, demo_scale * 0.6, .{ 0.8, 0.8, 0.8, 1.0 });
+            // Draw the atlas texture itself with zoom and pan
+            const base_size: f32 = 512;
+            try addAtlasQuadScaled(&vertices, allocator, atlas, atlas_pan_x, atlas_pan_y, base_size * atlas_scale);
 
-            // Scale indicator
-            var scale_buf: [32]u8 = undefined;
-            const scale_text = std.fmt.bufPrint(&scale_buf, "Scale: {d:.2}x", .{demo_scale}) catch "Scale: ?";
+            // Scale indicator (fixed position)
+            var scale_buf: [64]u8 = undefined;
+            const scale_text = std.fmt.bufPrint(&scale_buf, "Zoom: {d:.2}x | R: reset | T: text view", .{atlas_scale}) catch "Zoom: ?";
+            try addText(&vertices, allocator, atlas, scale_text, 50, 730, 0.35, .{ 0.4, 0.4, 0.4, 1.0 });
+        } else {
+            // Draw demo text with zoom and pan
+            const line_spacing: f32 = 60 * text_scale;
+            try addText(&vertices, allocator, atlas, "MSDF Text Rendering", text_pan_x, text_pan_y, text_scale, .{ 1.0, 1.0, 1.0, 1.0 });
+            try addText(&vertices, allocator, atlas, "The quick brown fox jumps", text_pan_x, text_pan_y + line_spacing, text_scale * 0.6, .{ 0.8, 0.8, 0.8, 1.0 });
+            try addText(&vertices, allocator, atlas, "over the lazy dog.", text_pan_x, text_pan_y + line_spacing * 1.67, text_scale * 0.6, .{ 0.8, 0.8, 0.8, 1.0 });
+
+            // Scale indicator (fixed position)
+            var scale_buf: [64]u8 = undefined;
+            const scale_text = std.fmt.bufPrint(&scale_buf, "Zoom: {d:.2}x | R: reset | T: atlas view", .{text_scale}) catch "Zoom: ?";
             try addText(&vertices, allocator, atlas, scale_text, 50, 700, 0.4, .{ 0.5, 0.5, 0.5, 1.0 });
 
             // Instructions
-            try addText(&vertices, allocator, atlas, "1/2=font, SPACE=source, T=atlas, Wheel=zoom", 50, 730, 0.35, .{ 0.4, 0.4, 0.4, 1.0 });
+            try addText(&vertices, allocator, atlas, "1/2=font, SPACE=source, Scroll=zoom", 50, 730, 0.35, .{ 0.4, 0.4, 0.4, 1.0 });
         }
 
         // Render
@@ -613,7 +717,7 @@ fn addText(vertices: *std.ArrayListUnmanaged(Vertex), allocator: Allocator, atla
     }
 }
 
-fn addAtlasQuad(vertices: *std.ArrayListUnmanaged(Vertex), allocator: Allocator, atlas: *const LoadedAtlas, x: f32, y: f32, size: f32) !void {
+fn addAtlasQuadScaled(vertices: *std.ArrayListUnmanaged(Vertex), allocator: Allocator, atlas: *const LoadedAtlas, x: f32, y: f32, size: f32) !void {
     const aspect = @as(f32, @floatFromInt(atlas.width)) / @as(f32, @floatFromInt(atlas.height));
     const w = size;
     const h = size / aspect;
