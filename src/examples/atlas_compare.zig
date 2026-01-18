@@ -56,11 +56,13 @@ const AtlasSource = enum {
 const FontType = enum {
     dejavu_sans,
     sf_mono,
+    jetbrains_mono,
 
     pub fn name(self: FontType) []const u8 {
         return switch (self) {
             .dejavu_sans => "DejaVu Sans",
             .sf_mono => "SF Mono",
+            .jetbrains_mono => "JetBrains Mono",
         };
     }
 
@@ -68,6 +70,7 @@ const FontType = enum {
         return switch (self) {
             .dejavu_sans => assets.dejavu_sans,
             .sf_mono => assets.sf_mono,
+            .jetbrains_mono => assets.jetbrains_mono,
         };
     }
 
@@ -75,6 +78,7 @@ const FontType = enum {
         return switch (self) {
             .dejavu_sans => "msdfgen-atlas",
             .sf_mono => "msdfgen-atlas-sfmono",
+            .jetbrains_mono => "msdfgen-atlas-jetbrains",
         };
     }
 };
@@ -244,7 +248,7 @@ pub fn run(allocator: Allocator) !void {
     const charset = " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()-=+[]{}|;:',.<>?/~`\"\\";
 
     // Load fonts and generate atlases
-    var font_atlases: [2]FontAtlasResources = undefined;
+    var font_atlases: [3]FontAtlasResources = undefined;
     var fonts_loaded: usize = 0;
 
     // Load DejaVu Sans (font 1)
@@ -261,6 +265,14 @@ pub fn run(allocator: Allocator) !void {
         return err;
     };
     fonts_loaded = 2;
+    errdefer font_atlases[1].deinit(device);
+
+    // Load JetBrains Mono (font 3)
+    font_atlases[2] = createFontAtlas(allocator, device, .jetbrains_mono, glyph_size, px_range, padding, charset) catch |err| {
+        log.err("Failed to create JetBrains Mono atlas: {}", .{err});
+        return err;
+    };
+    fonts_loaded = 3;
 
     defer {
         for (0..fonts_loaded) |i| {
@@ -268,7 +280,7 @@ pub fn run(allocator: Allocator) !void {
         }
     }
 
-    // Current font selection (0 = DejaVu Sans, 1 = SF Mono)
+    // Current font selection (0 = DejaVu Sans, 1 = SF Mono, 2 = JetBrains Mono)
     var current_font_index: usize = 0;
 
     // Try to load msdfgen atlases for each font
@@ -277,7 +289,8 @@ pub fn run(allocator: Allocator) !void {
         glyphs: ?std.AutoHashMap(u21, msdf.AtlasGlyph),
         pixels: ?[]u8,
     };
-    var msdfgen_atlases: [2]MsdfgenAtlasData = .{
+    var msdfgen_atlases: [3]MsdfgenAtlasData = .{
+        .{ .atlas = null, .glyphs = null, .pixels = null },
         .{ .atlas = null, .glyphs = null, .pixels = null },
         .{ .atlas = null, .glyphs = null, .pixels = null },
     };
@@ -296,7 +309,7 @@ pub fn run(allocator: Allocator) !void {
     }
 
     // Load msdfgen atlas for each font from their respective directories
-    const font_types = [_]FontType{ .dejavu_sans, .sf_mono };
+    const font_types = [_]FontType{ .dejavu_sans, .sf_mono, .jetbrains_mono };
     for (font_types, 0..) |font_type, i| {
         const path = if (msdfgen_atlas_path != null and i == 0)
             msdfgen_atlas_path.? // Use command-line path for first font if provided
@@ -370,6 +383,7 @@ pub fn run(allocator: Allocator) !void {
     log.info("Controls:", .{});
     log.info("  1     - Select DejaVu Sans font", .{});
     log.info("  2     - Select SF Mono font", .{});
+    log.info("  3     - Select JetBrains Mono font", .{});
     log.info("  SPACE - Toggle between zig-msdf and msdfgen atlas", .{});
     log.info("  T     - Toggle atlas view / text view", .{});
     log.info("  E     - Export current font atlas to zig-msdf-atlas/ directory", .{});
@@ -396,6 +410,12 @@ pub fn run(allocator: Allocator) !void {
                         if (current_font_index != 1) {
                             current_font_index = 1;
                             log.info("Switched to font: {s}", .{font_atlases[1].font_type.name()});
+                        }
+                    }
+                    if (key == c.SDLK_3) {
+                        if (current_font_index != 2) {
+                            current_font_index = 2;
+                            log.info("Switched to font: {s}", .{font_atlases[2].font_type.name()});
                         }
                     }
                     if (key == c.SDLK_SPACE) {
@@ -538,7 +558,7 @@ pub fn run(allocator: Allocator) !void {
             try addText(&vertices, allocator, atlas, scale_text, 50, 700, 0.4, .{ 0.5, 0.5, 0.5, 1.0 });
 
             // Instructions
-            try addText(&vertices, allocator, atlas, "1/2=font, SPACE=source, Scroll=zoom", 50, 730, 0.35, .{ 0.4, 0.4, 0.4, 1.0 });
+            try addText(&vertices, allocator, atlas, "1/2/3=font, SPACE=source, Scroll=zoom", 50, 730, 0.35, .{ 0.4, 0.4, 0.4, 1.0 });
         }
 
         // Render
