@@ -131,18 +131,11 @@ fn createFontAtlas(
     };
     errdefer font.deinit();
 
-    // Detect if font has inverted winding order
-    const needs_inversion = msdf.detectInvertedWinding(allocator, font);
-    if (needs_inversion) {
-        log.info("{s}: detected inverted winding, enabling distance inversion", .{font_type.name()});
-    }
-
     var atlas_result = msdf.generateAtlas(allocator, font, .{
         .chars = charset,
         .glyph_size = glyph_size,
         .padding = padding,
         .range = px_range,
-        .invert_distances = needs_inversion,
     }) catch |err| {
         log.err("Atlas generation failed for {s}: {}", .{ font_type.name(), err });
         return error.AtlasGenerationFailed;
