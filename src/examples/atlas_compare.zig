@@ -29,6 +29,7 @@ const log = std.log.scoped(.atlas_compare);
 const is_macos = builtin.os.tag == .macos;
 const vert_shader_code = if (is_macos) @embedFile("../msdf.vert.metal") else @embedFile("../msdf.vert.spv");
 const frag_shader_code = if (is_macos) @embedFile("../msdf.frag.metal") else @embedFile("../msdf.frag.spv");
+const passthrough_frag_code = if (is_macos) @embedFile("../passthrough.frag.metal") else @embedFile("../passthrough.frag.spv");
 const shader_format = if (is_macos) c.SDL_GPU_SHADERFORMAT_MSL else c.SDL_GPU_SHADERFORMAT_SPIRV;
 const shader_entrypoint = if (is_macos) "main0" else "main";
 
@@ -233,9 +234,15 @@ pub fn run(allocator: Allocator) !void {
     const frag_shader = createShader(device, frag_shader_code, .fragment) orelse return error.ShaderCreationFailed;
     defer c.SDL_ReleaseGPUShader(device, frag_shader);
 
-    // Create pipeline
+    const passthrough_frag_shader = createShader(device, passthrough_frag_code, .fragment) orelse return error.ShaderCreationFailed;
+    defer c.SDL_ReleaseGPUShader(device, passthrough_frag_shader);
+
+    // Create pipelines (MSDF and passthrough for raw view)
     const pipeline = createPipeline(device, vert_shader, frag_shader) orelse return error.PipelineCreationFailed;
     defer c.SDL_ReleaseGPUGraphicsPipeline(device, pipeline);
+
+    const passthrough_pipeline = createPipeline(device, vert_shader, passthrough_frag_shader) orelse return error.PipelineCreationFailed;
+    defer c.SDL_ReleaseGPUGraphicsPipeline(device, passthrough_pipeline);
 
     // Create sampler
     const sampler = createSampler(device) orelse return error.SamplerCreationFailed;
@@ -351,6 +358,7 @@ pub fn run(allocator: Allocator) !void {
     // State
     var current_source: AtlasSource = .zig_msdf;
     var show_atlas: bool = false;
+    var raw_view: bool = false; // When true, shows raw RGB texture instead of MSDF-rendered
     var running = true;
     var vertices = std.ArrayListUnmanaged(Vertex){};
     defer vertices.deinit(allocator);
@@ -386,6 +394,7 @@ pub fn run(allocator: Allocator) !void {
     log.info("  3     - Select JetBrains Mono font", .{});
     log.info("  SPACE - Toggle between zig-msdf and msdfgen atlas", .{});
     log.info("  T     - Toggle atlas view / text view", .{});
+    log.info("  V     - Toggle raw RGB view (atlas view only)", .{});
     log.info("  E     - Export current font atlas to zig-msdf-atlas/ directory", .{});
     log.info("  UP/DOWN or Mouse wheel - Adjust scale", .{});
     log.info("  ESC   - Exit", .{});
@@ -429,6 +438,10 @@ pub fn run(allocator: Allocator) !void {
                     }
                     if (key == 't' or key == 'T') {
                         show_atlas = !show_atlas;
+                    }
+                    if (key == 'v' or key == 'V') {
+                        raw_view = !raw_view;
+                        log.info("Raw view: {s}", .{if (raw_view) "enabled" else "disabled"});
                     }
                     if (key == 'e' or key == 'E') {
                         exportAtlas(allocator, &font_atlases[current_font_index].atlas_result, glyph_size, px_range, padding) catch |err| {
@@ -627,7 +640,9 @@ pub fn run(allocator: Allocator) !void {
 
         const render_pass = c.SDL_BeginGPURenderPass(cmd, &color_target, 1, null);
         if (render_pass != null and vertices.items.len > 0) {
-            c.SDL_BindGPUGraphicsPipeline(render_pass, pipeline);
+            // Use passthrough pipeline for raw view in atlas mode
+            const active_pipeline = if (show_atlas and raw_view) passthrough_pipeline else pipeline;
+            c.SDL_BindGPUGraphicsPipeline(render_pass, active_pipeline);
 
             const uniforms = Uniforms{
                 .screen_size = .{ @floatFromInt(swapchain_w), @floatFromInt(swapchain_h) },
