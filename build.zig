@@ -124,6 +124,12 @@ pub fn build(b: *std.Build) void {
     const compare_step = b.step("run-compare", "Run atlas comparison example (zig-msdf vs msdfgen)");
     compare_step.dependOn(&run_compare.step);
 
+    const run_coloring = b.addRunArtifact(exe);
+    run_coloring.addArg("coloring");
+    run_coloring.step.dependOn(b.getInstallStep());
+    const coloring_step = b.step("run-coloring", "Run edge coloring features demo");
+    coloring_step.dependOn(&run_coloring.step);
+
     // Tests
     const renderer_tests = b.addTest(.{
         .root_module = renderer_mod,
