@@ -5,8 +5,8 @@
     .minimum_zig_version = "0.14.0",
     .dependencies = .{
         .@"zig-msdf" = .{
-            .url = "git+https://github.com/PhilipLudington/zig-msdf#f82629c52dd1f60f296f700ed2bbb266d94312a4",
-            .hash = "zig_msdf-0.1.0-1nuB2YPOBQD2jztAgFSMNpW2W5m0RB6VHuNN40V4WKTs",
+            .url = "git+https://github.com/PhilipLudington/zig-msdf#main",
+            .hash = "zig_msdf-0.1.0-1nuB2S5lBgAEEVQTNKxq7cEfe8_E0rU-w-sNihggw7b_",
         },
         .sdl = .{
             .url = "git+https://github.com/allyourcodebase/SDL3#main",
